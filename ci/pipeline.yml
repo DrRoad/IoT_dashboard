@@ -1,0 +1,64 @@
+resource_types:
+- name: slack_notification
+  type: docker-image
+  source:
+    repository: cfcommunity/slack-notification-resource
+    tag: latest
+
+resources:
+- name: app_sources
+  type: git
+  source:
+    uri: https://github.com/smichard/IoT_dashboard.git
+    branch: master
+  check_every: 10s
+
+- name: docker_hub
+  type: docker-image
+  source:
+    email: {{docker_hub_email}}
+    username: {{docker_hub_username}}
+    password: {{docker_hub_password}}
+    repository: {{docker_hub_repository}}
+
+- name: slack_msg
+  type: slack_notification
+  source:
+    url: {{slack_hook}}
+
+jobs:
+  - name: test-app
+    public: true
+
+    serial: true
+    plan:
+      - get: app_sources
+        trigger: true
+      - task: unit
+        file: app_sources/ci/tasks/unit.yml
+
+  - name: deploy-app
+    public: true
+    serial: true
+    plan:
+    - get: app_sources
+      passed: [ test-app ]
+      version: every
+      trigger: true
+    - put: docker_hub
+      params:
+        build: app_sources/
+      on_success:
+        put: slack_msg
+        params:
+          channel: '#general'
+          text: |
+            Dev: The build $BUILD_JOB_NAME with build ID $BUILD_ID for pipeline $BUILD_PIPELINE_NAME completed succesfully. The new container is available on Docker Hub:
+            https://hub.docker.com/u/smichard/
+      on_failure:
+        put: slack_msg
+        params:
+          channel: '#general'
+          text: |
+            Dev: The build $BUILD_JOB_NAME with build ID $BUILD_ID for pipeline $BUILD_PIPELINE_NAME failed. Check it out at:
+            http://deploy.michard.de/builds/$BUILD_ID
