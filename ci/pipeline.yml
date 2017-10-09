@@ -26,6 +26,26 @@ resources:
   source:
     url: {{slack_hook}}
 
+- name: version
+  type: semver
+  source:
+    uri: https://github.com/smichard/IoT_dashboard.git
+    branch: version
+    username: {{github_username}}
+    password: {{github_password}}
+    file: version
+    driver: git
+    initial_version: 0.5.0
+
+- name: S3_target
+  type: s3
+  source:
+    endpoint: {{s3_endpoint}}
+    bucket: releases
+    regexp: release_history/iot_dashboard-(.*)-(.*).tar.gz
+    access_key_id: {{s3_key}}
+    secret_access_key: {{s3_secret}}
+
 jobs:
   - name: test-app
     public: true
@@ -62,3 +82,49 @@ jobs:
           text: |
             Dev: The build $BUILD_JOB_NAME with build ID $BUILD_ID for pipeline $BUILD_PIPELINE_NAME failed. Check it out at:
             http://deploy.michard.de/builds/$BUILD_ID
+
+  - name: ecs-backup
+    public: true
+    serial: true
+    plan:
+    - get: version
+      trigger: false
+    - get: app_sources
+      trigger: true
+      passed: [ deploy-app ]
+    - task: create-artifact
+      file: app_sources/ci/tasks/create_artifact.yml
+    - put: S3_target
+      params:
+        file: ./artifact/iot_dashboard-*-*.tar.gz
+        acl: public-read
+
+  - name: bump-version-minor
+    public: true
+    plan:
+      - aggregate:
+        - get:  app_sources
+          passed: [ ecs-backup ]
+          trigger: true
+        - get: version
+          trigger: false
+        - put: version
+          params: {bump: minor}
+
+  - name: minor
+    public: true
+    plan:
+      - aggregate:
+        - get: version
+          trigger: false
+        - put: version
+          params: {bump: minor}
+
+  - name: major
+    public: true
+    plan:
+      - aggregate:
+        - get: version
+          trigger: false
+        - put: version
+          params: {bump: major}
